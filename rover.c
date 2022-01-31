@@ -1036,6 +1036,7 @@ main(int argc, char *argv[])
     FILE *save_cwd_file = NULL;
     FILE *save_marks_file = NULL;
     FILE *clip_file;
+    int output_paths_fd = -1;
 
     if (argc >= 2) {
         if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
@@ -1067,6 +1068,34 @@ main(int argc, char *argv[])
                 argc -= 2; argv += 2;
             } else {
                 fprintf(stderr, "error: missing argument to %s\n", argv[1]);
+                return 1;
+            }
+        } else if (!strcmp(argv[1], "-o") || !strcmp(argv[1], "--output-paths")) {
+            if (argc > 2) {
+                /* Mostly copied form dvtm's open_or_create_fifo() */
+                struct stat info;
+
+                do {
+                    output_paths_fd = open(argv[2], O_NONBLOCK | O_RDWR);
+                    if (output_paths_fd == -1) {
+                        if (errno == ENOENT && !mkfifo(argv[2], S_IRUSR | S_IWUSR))
+                            continue;
+                        fprintf(stderr, "error: %s: %s\n", argv[2], strerror(errno));
+                        return 1;
+                    }
+                } while (output_paths_fd == -1);
+
+                if (fstat(output_paths_fd, &info) == -1) {
+                    fprintf(stderr, "error: %s: %s\n", argv[2], strerror(errno));
+                    return 1;
+                }
+                if (!S_ISFIFO(info.st_mode)) {
+                    fprintf(stderr, "error: %s is not a named pipe\n", argv[2]);
+                    return 1;
+                }
+                argc -= 2; argv += 2;
+            } else {
+                fprintf(stderr, "error: missing argument to %s\n", argv[2]);
                 return 1;
             }
         }
@@ -1251,8 +1280,30 @@ paste_path_fail:
                 cd(0);
         } else if (!strcmp(key, RVK_OPEN)) {
             if (!rover.nfiles || S_ISDIR(EMODE(ESEL))) continue;
-            if (open_with_env(user_open, ENAME(ESEL)))
-                cd(0);
+            if (output_paths_fd == -1) {
+                /* With no paths fd, act normally */
+                if (open_with_env(user_open, ENAME(ESEL)))
+                    cd(0);
+            } else {
+                /* With paths fd, write selected path(s) to it, terminated by
+                 * \0 */
+                int count = rover.marks.nentries
+                    ? PATH_MAX * rover.marks.nentries : PATH_MAX;
+                char *output_buf = malloc(count), *buf_end = output_buf;
+                if (rover.marks.nentries) {
+                    for (int i = 0; i < rover.marks.nentries; i++)
+                        buf_end += 1 + snprintf(buf_end, PATH_MAX, "%s%s",
+                            rover.marks.dirpath, rover.marks.entries[i]);
+                } else {
+                    buf_end += 1 + snprintf(buf_end, PATH_MAX, "%s%s",
+                        CWD, ENAME(ESEL));
+                }
+                count = buf_end - output_buf;
+                count -= write(output_paths_fd, output_buf, count);
+                free(output_buf);
+                if (count)
+                    message(RED, "Something went wrong while printing paths.");
+            }
         } else if (!strcmp(key, RVK_SEARCH)) {
             int oldsel, oldscroll, length;
             if (!rover.nfiles) continue;

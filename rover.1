@@ -5,6 +5,7 @@ rover \- file browser for the terminal
 .B rover
 [\fB\-d\fR|\fB\-\-save\-cwd\fR \fIFILE\fR]
 [\fB\-m\fR|\fB\-\-save\-marks\fR \fIFILE\fR]
+[\fB\-o\fR|\fB\-\-output\-paths\fR \fIFIFO\fR]
 [\fIDIR\fR [\fIDIR\fR [\fIDIR\fR [...]]]]
 .br
 .B rover
@@ -22,6 +23,9 @@ write last visited path to \fIFILE\fR before exiting
 \fB\-m\fR, \fB\-\-save\-marks\fR
 append path of marked entries to \fIFILE\fR before exiting;
 if \fIFILE\fR doesn't exist, it'll be created
+.TP
+\fB\-o\fR, \fB\-\-output\-paths\fR
+instead of opening files with \fB$OPEN\fR, write the paths to \fIFIFO\fr
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 print help message and exit
