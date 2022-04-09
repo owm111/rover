@@ -433,6 +433,58 @@ init_term()
     enable_handlers();
 }
 
+/* If /wstr/'s width is equal to or less than /targetcols/ columns, does
+ * nothing. If it is greater, then truncate /wstr/ and append /ellip/ (which is
+ * assumed to be /ellipw/ columns wide) such that the resulting string is less
+ * than or exactly /targetcols/ columns.
+ *
+ * Return 1 if /wstr/ was truncated; 0 otherwise.
+ *
+ * XXX: return some pointers/ints that can be used to speed up space_to (below)
+ */
+static int
+trunc_to(int targetcols, wchar_t *wstr, wchar_t *ellip, int ellipw)
+{
+	int actualcols = 0;
+	int last;
+
+	for (last = 0; wstr[last] && actualcols < targetcols; ++last) {
+		actualcols += wcwidth(wstr[last]);
+	}
+
+	if (actualcols == targetcols && wstr[last] == L'\0') {
+		/* Exactly long enough */
+		return 0;
+	} else if (actualcols < targetcols) {
+		/* Too short */
+		return 0;
+	} else {
+		/* The /last/ character made it too wide */
+		while (actualcols + ellipw > targetcols)
+			actualcols -= wcwidth(wstr[last--]);
+		wcscpy(&wstr[last], ellip);
+		return 1;
+	}
+}
+
+/* Append L' ' until /wstr/ is /targetcols/ characters wide.
+ *
+ * Assumes /wstr/ has at least /targetcols/+1 bytes allocated.
+ *
+ * XXX: see trunc_to
+ */
+static void
+space_to(int targetcols, wchar_t *wstr)
+{
+	int actualcols = wcswidth(wstr, targetcols + 1);
+	int spaceslen = targetcols - actualcols;
+	/* I'm guessing this is faster than spaceslen calls to wcscat(, L' ') */
+	wchar_t spaces[spaceslen + 1];
+	wmemset(spaces, L' ', spaceslen);
+	spaces[spaceslen] = L'\0';
+	wcscat(wstr, spaces);
+}
+
 /* Update the listing view. */
 static void
 update_view()
@@ -490,25 +542,32 @@ update_view()
             wcolor_set(rover.window, RVC_FIFO, NULL);
         else if (S_ISSOCK(EMODE(j)))
             wcolor_set(rover.window, RVC_SOCK, NULL);
+        int target_name_length = COLS - 4 /* border/padding */ - 8 /* size */;
+	wchar_t *ellip = L"…";
+	int ellipw = 1;
         if (S_ISDIR(EMODE(j))) {
             mbstowcs(WBUF, ENAME(j), PATH_MAX);
-            if (ISLINK(j))
+	    int did_trunc = trunc_to(target_name_length - 1, WBUF, ellip, ellipw);
+            if (did_trunc || ISLINK(j))
                 wcscat(WBUF, L"/");
         } else {
             char *suffix, *suffixes = "BKMGTPEZY";
             off_t human_size = ESIZE(j) * 10;
             int length = mbstowcs(WBUF, ENAME(j), PATH_MAX);
             int namecols = wcswidth(WBUF, length);
+	    trunc_to(target_name_length, WBUF, ellip, ellipw);
+	    space_to(target_name_length, WBUF);
             for (suffix = suffixes; human_size >= 10240; suffix++)
                 human_size = (human_size + 512) / 1024;
+	    /* XXX: perhaps calculate the width of formatted first, then use
+	     * that for target_name_length? */
+	    wchar_t formatted[11];
             if (*suffix == 'B')
-                swprintf(WBUF + length, PATH_MAX - length, L"%*d %c",
-                         (int) (COLS - namecols - 6),
-                         (int) human_size / 10, *suffix);
+		swprintf(formatted, 10, L" %4d B", (int)human_size / 10);
             else
-                swprintf(WBUF + length, PATH_MAX - length, L"%*d.%d %c",
-                         (int) (COLS - namecols - 8),
-                         (int) human_size / 10, (int) human_size % 10, *suffix);
+		    swprintf(formatted, 10, L" %3d.%d %c", (int)human_size / 10,
+				    (int)human_size % 10, *suffix);
+	    wcscat(WBUF, formatted);
         }
         mvwhline(rover.window, i + 1, 1, ' ', COLS - 2);
         mvwaddnwstr(rover.window, i + 1, 2, WBUF, COLS - 4);
